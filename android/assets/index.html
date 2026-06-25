@@ -859,22 +859,65 @@ const Canvas = (() => {
   };
 })();
 
-// ── CLAUDE API ─────────────────────────────────────────────────────
-const Claude = {
-  async stream(messages, systemPrompt, onChunk, onDone) {
-    const key = state.settings.claudeKey;
-    if (!key) { onChunk('⚠ Please set your Claude API key in Settings.'); onDone(); return; }
+// ── UTF-8 safe base64 encode/decode ───────────────────────────────
+function b64enc(str) {
+  try { return btoa(unescape(encodeURIComponent(str))); } catch(e) { return btoa(str); }
+}
+function b64dec(b64) {
+  try { return decodeURIComponent(escape(atob(b64))); } catch(e) { return atob(b64); }
+}
 
-    const body = {
-      model: state.settings.model || 'claude-opus-4-8',
-      max_tokens: 2048,
-      system: systemPrompt || 'You are Maestro, a helpful AI assistant.',
-      messages,
-      stream: true
+// ── CLAUDE API — calls Java bridge (no CORS) ───────────────────────
+const Claude = {
+  send(messages, systemPrompt, onChunk, onDone) {
+    const key = state.settings.claudeKey;
+    if (!key) { onChunk('⚠ Set your Claude API key in Settings ⚙'); onDone(); return; }
+
+    const callbackId = 'cl_' + Date.now();
+    const model = state.settings.model || 'claude-opus-4-8';
+
+    window.maestroApiResult = function(id, code, responseB64) {
+      if (id !== callbackId) return;
+      window.maestroApiResult = null;
+      try {
+        const raw = b64dec(responseB64);
+        if (code === 0) { onChunk('⚠ Network error — check internet connection'); onDone(); return; }
+        const data = JSON.parse(raw);
+        if (data.content && data.content[0] && data.content[0].text) {
+          // Simulate streaming by revealing text word-by-word
+          const words = data.content[0].text.split(' ');
+          let idx = 0;
+          const tick = () => {
+            if (idx < words.length) {
+              onChunk((idx === 0 ? '' : ' ') + words[idx++]);
+              setTimeout(tick, 18);
+            } else {
+              onDone();
+            }
+          };
+          tick();
+        } else if (data.error) {
+          onChunk('⚠ ' + (data.error.message || 'API error ' + code));
+          onDone();
+        } else {
+          onChunk('⚠ Unexpected response (code ' + code + ')');
+          onDone();
+        }
+      } catch(e) {
+        onChunk('⚠ Parse error: ' + e.message);
+        onDone();
+      }
     };
 
-    try {
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    if (window.MaestroBridge) {
+      window.MaestroBridge.claudeChat(
+        callbackId, key, model,
+        b64enc(systemPrompt || 'You are Maestro, a helpful AI assistant.'),
+        b64enc(JSON.stringify(messages))
+      );
+    } else {
+      // Browser fallback — direct fetch (works on desktop, not from file://)
+      fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'x-api-key': key,
@@ -882,85 +925,70 @@ const Claude = {
           'content-type': 'application/json',
           'anthropic-dangerous-direct-browser-calls': 'true'
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          model, max_tokens: 2048,
+          system: systemPrompt || 'You are Maestro, a helpful AI assistant.',
+          messages
+        })
+      }).then(r => r.json()).then(data => {
+        if (window.maestroApiResult)
+          window.maestroApiResult(callbackId, 200, b64enc(JSON.stringify(data)));
+      }).catch(e => {
+        if (window.maestroApiResult)
+          window.maestroApiResult(callbackId, 0, b64enc(e.message));
       });
-
-      if (!resp.ok) {
-        const err = await resp.text();
-        onChunk('⚠ Claude API error: ' + resp.status);
-        onDone();
-        return;
-      }
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-          try {
-            const evt = JSON.parse(data);
-            if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
-              onChunk(evt.delta.text);
-            }
-          } catch(e){}
-        }
-      }
-      onDone();
-    } catch(e) {
-      onChunk('⚠ Network error: ' + e.message);
-      onDone();
     }
   }
 };
 
-// ── ELEVENLABS TTS ─────────────────────────────────────────────────
+// ── ELEVENLABS TTS — calls Java bridge (no CORS) ──────────────────
 const TTS = {
-  audioCtx: null,
-  currentSource: null,
-
-  async speak(text) {
+  speak(text) {
     const key = state.settings.elevenKey;
     const voiceId = state.settings.voiceId || '6FiCmD8eY5VyjOdG5Zjk';
     if (!key || !state.settings.ttsEnabled) return;
 
     state.isSpeaking = true;
-    const clean = text.replace(/[*_`#>\[\]]/g, '').replace(/\n+/g, ' ').trim().slice(0, 1000);
+    const clean = text.replace(/[*_`#>\[\]]/g, '').replace(/\n+/g, ' ').trim().slice(0, 900);
+    const callbackId = 'tts_' + Date.now();
 
-    try {
-      const resp = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    window.maestroAudioResult = function(id, status, audioB64) {
+      if (id !== callbackId) return;
+      window.maestroAudioResult = null;
+      if (status === 'ok' && audioB64) {
+        try {
+          const bytes = atob(audioB64);
+          const arr = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+          const blob = new Blob([arr], { type: 'audio/mpeg' });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => { state.isSpeaking = false; URL.revokeObjectURL(url); };
+          audio.onerror = () => { state.isSpeaking = false; };
+          audio.play().catch(() => { state.isSpeaking = false; });
+        } catch(e) { state.isSpeaking = false; }
+      } else {
+        state.isSpeaking = false;
+      }
+    };
+
+    if (window.MaestroBridge) {
+      window.MaestroBridge.elevenLabsSpeak(callbackId, key, voiceId, b64enc(clean));
+    } else {
+      // Browser fallback
+      fetch('https://api.elevenlabs.io/v1/text-to-speech/' + voiceId, {
         method: 'POST',
         headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: clean,
-          model_id: 'eleven_monolingual_v1',
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 }
-        })
-      });
-      if (!resp.ok) { state.isSpeaking = false; return; }
-
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.onended = () => { state.isSpeaking = false; URL.revokeObjectURL(url); };
-      audio.onerror = () => { state.isSpeaking = false; };
-      await audio.play();
-    } catch(e) {
-      state.isSpeaking = false;
+        body: JSON.stringify({ text: clean, model_id: 'eleven_monolingual_v1',
+          voice_settings: { stability: 0.5, similarity_boost: 0.75 } })
+      }).then(r => r.arrayBuffer()).then(buf => {
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        if (window.maestroAudioResult) window.maestroAudioResult(callbackId, 'ok', b64);
+      }).catch(() => { if (window.maestroAudioResult) window.maestroAudioResult(callbackId, 'error', ''); });
     }
   },
 
-  stop() {
-    state.isSpeaking = false;
-  }
+  stop() { state.isSpeaking = false; }
 };
 
 // ── SPEECH RECOGNITION ─────────────────────────────────────────────
@@ -1251,7 +1279,7 @@ async function sendMessage(text) {
   let fullResponse = '';
   let started = false;
 
-  await Claude.stream(
+  Claude.send(
     state.history.slice(-20),
     state.active.system_prompt || '',
     (chunk) => {
