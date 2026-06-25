@@ -3,7 +3,7 @@ Obsidian-compatible brain backed by ChromaDB for semantic search.
 
 Each agent gets brain/<agent_id>/ with markdown memory files that can be
 opened directly in Obsidian. ChromaDB mirrors the same content for fast
-vector retrieval.
+vector retrieval using the bundled ONNX miniLM embedding model.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from ..core.config import settings
-from ..core.ollama_client import embed
 
 _chroma: chromadb.ClientAPI | None = None
 
@@ -35,6 +34,7 @@ def _get_chroma() -> chromadb.ClientAPI:
 
 
 def _collection(agent_id: str) -> chromadb.Collection:
+    # No embedding_function specified → ChromaDB uses the bundled ONNX miniLM model.
     return _get_chroma().get_or_create_collection(
         name=f"agent_{agent_id}",
         metadata={"hnsw:space": "cosine"},
@@ -54,13 +54,11 @@ async def store(
     memory_id: str | None = None,
 ) -> str:
     memory_id = memory_id or str(uuid.uuid4())
-    embedding = await embed(content)
     ts = time.time()
     dt = datetime.fromtimestamp(ts)
 
     _collection(agent_id).add(
         ids=[memory_id],
-        embeddings=[embedding],
         documents=[content],
         metadatas=[{"agent_id": agent_id, "tags": json.dumps(tags), "timestamp": ts}],
     )
@@ -71,14 +69,13 @@ async def store(
 
 async def retrieve(agent_id: str, query: str, n: int | None = None) -> list[str]:
     n = n or settings.max_memory_results
-    embedding = await embed(query)
     col = _collection(agent_id)
 
     if col.count() == 0:
         return []
 
     results = col.query(
-        query_embeddings=[embedding],
+        query_texts=[query],
         n_results=min(n, col.count()),
         include=["documents"],
     )

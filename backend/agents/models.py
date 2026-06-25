@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,9 +27,17 @@ class AgentRecord(BaseModel):
     state: AgentState = AgentState.dormant
 
 
+class Attachment(BaseModel):
+    type: str                     # "text_file" | "image"
+    name: str = ""
+    content: str = ""             # text file content or empty for images
+    media_type: str = ""          # e.g. "image/png"
+    data: str = ""                # base64 for images
+
+
 class ChatRequest(BaseModel):
     prompt: str
-    stream: bool = True
+    attachments: list[Attachment] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -43,7 +49,7 @@ class ChatResponse(BaseModel):
 class CollaborationRequest(BaseModel):
     agent_ids: list[str] = Field(..., min_length=2, max_length=4)
     prompt: str
-    max_turns: int = Field(default=6, ge=2, le=12)
+    max_turns: int = Field(default=4, ge=2, le=12)
 
 
 class CollaborationTurn(BaseModel):

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Castro — Chief of Staff</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Animated starfield canvas -->
+  <canvas id="starfield"></canvas>
+
+  <div id="app">
+
+    <!-- ── TOP BAR ── -->
+    <header id="topbar">
+      <div class="brand">
+        <span class="brand-glyph">◈</span>
+        <span class="brand-name">CASTRO</span>
+        <span class="brand-sep">|</span>
+        <span class="brand-sub">Chief of Staff</span>
+      </div>
+
+      <div class="active-pill" id="activePill">
+        <span class="active-avatar" id="activeAvatar">—</span>
+        <span class="active-name" id="activeName">No agent selected</span>
+      </div>
+
+      <div class="topbar-controls">
+        <div class="health-indicator" id="healthIndicator">
+          <span class="h-dot"></span>
+          <span class="h-label">CONNECTING</span>
+        </div>
+        <button class="ctrl-btn voice-ctrl" title="Voice — coming soon" disabled>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        <div class="clock" id="clock">—</div>
+      </div>
+    </header>
+
+    <!-- ── WORKSPACE ── -->
+    <main id="workspace">
+
+      <!-- LEFT: Agent roster -->
+      <aside id="agentPanel">
+        <div class="ap-header">
+          <span class="ap-title">ROSTER</span>
+          <span class="ap-count" id="agentCount">—</span>
+        </div>
+        <nav class="agent-list" id="agentList">
+          <div class="list-placeholder">Loading agents…</div>
+        </nav>
+        <div class="ap-footer">
+          <button class="new-persona-btn" id="uploadPersonaBtn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Persona
+          </button>
+        </div>
+      </aside>
+
+      <!-- CENTER: Chat -->
+      <section id="chatArea">
+
+        <!-- Welcome screen -->
+        <div id="welcomeState">
+          <div class="wl-emblem">◈</div>
+          <h1 class="wl-title">Castro</h1>
+          <p class="wl-sub">Select an agent from the roster to begin your session</p>
+          <div class="wl-features">
+            <div class="wl-feat"><span>◎</span>17 specialised agents</div>
+            <div class="wl-feat"><span>⟳</span>Multi-agent collaboration</div>
+            <div class="wl-feat"><span>◈</span>Persistent memory brain</div>
+            <div class="wl-feat"><span>📎</span>File &amp; image attachments</div>
+            <div class="wl-feat"><span>🎤</span>Voice — coming soon</div>
+          </div>
+        </div>
+
+        <!-- Active chat -->
+        <div id="chatSession" class="hidden">
+
+          <!-- Chat header -->
+          <div class="chat-hd" id="chatHd">
+            <div class="ch-meta">
+              <div class="ch-avatar" id="chAvatar"></div>
+              <div class="ch-info">
+                <h2 class="ch-name" id="chName"></h2>
+                <div class="ch-caps" id="chCaps"></div>
+              </div>
+            </div>
+            <div class="ch-actions">
+              <button class="hd-btn" id="clearBtn" title="Clear history">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+                Clear
+              </button>
+              <button class="hd-btn hd-btn--gold" id="collabBtn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+                Collaborate
+              </button>
+            </div>
+          </div>
+
+          <!-- Messages -->
+          <div class="messages-wrap" id="messagesWrap">
+            <div class="messages-inner" id="messagesInner"></div>
+          </div>
+
+          <!-- Input zone -->
+          <div class="input-zone">
+            <div class="attach-bar" id="attachBar"></div>
+            <div class="input-row">
+              <button class="input-btn" id="attachBtn" title="Attach file">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                </svg>
+              </button>
+              <input type="file" id="fileInput" multiple hidden>
+              <textarea id="chatInput" placeholder="Message the agent…" rows="1"></textarea>
+              <button class="input-btn" disabled title="Voice — coming soon">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                </svg>
+              </button>
+              <button class="send-btn" id="sendBtn">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <line x1="12" y1="19" x2="12" y2="5"/>
+                  <polyline points="5 12 12 5 19 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+        </div><!-- /chatSession -->
+      </section>
+
+      <!-- RIGHT: Info panel -->
+      <aside id="rightPanel">
+        <div class="rp-tabs" id="rpTabs">
+          <button class="rp-tab active" data-tab="memory">Memory</button>
+          <button class="rp-tab" data-tab="files">Files</button>
+          <button class="rp-tab" data-tab="info">Info</button>
+        </div>
+        <div class="rp-body" id="rpBody">
+          <div class="rp-empty">Select an agent to view details</div>
+        </div>
+        <button class="rp-toggle" id="rpToggle" title="Toggle panel">›</button>
+      </aside>
+
+    </main><!-- /workspace -->
+  </div><!-- /app -->
+
+  <!-- ── MODALS ── -->
+
+  <!-- Collaboration modal -->
+  <div class="modal-overlay hidden" id="collabModal">
+    <div class="modal">
+      <div class="modal-hd">
+        <h3>Collaboration Session</h3>
+        <button class="modal-x" data-close="collabModal">✕</button>
+      </div>
+      <p class="modal-hint">Select 2–4 agents. They will work sequentially, each building on the previous response.</p>
+      <div class="collab-grid" id="collabGrid"></div>
+      <div class="form-group">
+        <label class="form-label">Task</label>
+        <textarea class="modal-ta" id="collabPrompt" placeholder="Describe the task for the team…" rows="3"></textarea>
+      </div>
+      <div class="form-group form-group--inline">
+        <label class="form-label">Max turns</label>
+        <input type="number" class="modal-num" id="collabTurns" value="4" min="2" max="12">
+      </div>
+      <div class="modal-ft">
+        <button class="btn-ghost" data-close="collabModal">Cancel</button>
+        <button class="btn-gold" id="launchCollabBtn">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload persona modal -->
+  <div class="modal-overlay hidden" id="personaModal">
+    <div class="modal">
+      <div class="modal-hd">
+        <h3>Upload Persona</h3>
+        <button class="modal-x" data-close="personaModal">✕</button>
+      </div>
+      <p class="modal-hint">Drop a <code>.yaml</code> file following the Castro persona format.</p>
+      <div class="drop-zone" id="personaDrop">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span>Drop .yaml here or click to browse</span>
+        <input type="file" id="personaFileInput" accept=".yaml">
+      </div>
+      <div class="modal-ft">
+        <button class="btn-ghost" data-close="personaModal">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

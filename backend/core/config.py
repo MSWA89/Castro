@@ -9,10 +9,10 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Ollama
-    ollama_host: str = "http://localhost:11434"
-    chat_model: str = "qwen2.5:7b"
-    embed_model: str = "nomic-embed-text"
+    # Claude API
+    anthropic_api_key: str = ""
+    chat_model: str = "claude-opus-4-8"
+    max_tokens: int = 4096
 
     # Storage
     db_path: Path = Path("data/castro.db")

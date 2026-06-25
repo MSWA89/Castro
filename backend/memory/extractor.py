@@ -2,7 +2,7 @@
 Async memory extraction pipeline.
 
 After each assistant response, this fires as a background task.
-It asks the model to surface 1-3 durable facts, stores them in
+It asks Claude to surface 1-3 durable facts, stores them in
 ChromaDB, and writes them to the Obsidian brain.
 """
 
@@ -12,7 +12,7 @@ import json
 import logging
 
 from ..core.config import settings
-from ..core.ollama_client import chat_complete
+from ..core.claude_client import chat_complete
 from . import brain
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,6 @@ async def extract(
             messages=[{"role": "user", "content": prompt}]
         )
         raw = raw.strip()
-        # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):

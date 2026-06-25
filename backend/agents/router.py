@@ -2,15 +2,14 @@
 Agent interaction routes.
 
 Learning loop per request:
-  1. Retrieve relevant memories from the brain
-  2. Build context: [persona] + [memories] + [conversation history] + [user message]
-  3. Stream response
+  1. Retrieve relevant memories (semantic search via ChromaDB)
+  2. Build context: system=[persona + memories] + messages=[history + user]
+  3. Stream response via Claude API
   4. After stream: extract and store new memories (background task)
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import uuid
@@ -22,12 +21,13 @@ import aiosqlite
 
 from ..core.config import settings
 from ..core.database import get_db
-from ..core.ollama_client import chat_stream, chat_complete
+from ..core.claude_client import chat_stream, chat_complete
 from ..memory import brain, extractor
 from ..personas.loader import registry
 from .models import (
     AgentRecord,
     AgentState,
+    Attachment,
     ChatRequest,
     ChatResponse,
     CollaborationRequest,
@@ -44,23 +44,41 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 # ---------------------------------------------------------------------------
 
 
-def _build_messages(
+def _build_system_and_messages(
     persona_prompt: str,
     memories: list[str],
-    history: list[dict[str, str]],
+    history: list[dict],
     user_message: str,
-) -> list[dict[str, str]]:
+    attachments: list[Attachment] | None = None,
+) -> tuple[str, list[dict]]:
+    """Return (system_prompt, messages) in Claude API format."""
     system_parts = [persona_prompt]
     if memories:
         mem_block = "\n".join(f"- {m}" for m in memories)
         system_parts.append(f"\n\nRelevant memories about this user:\n{mem_block}")
+    system = "\n".join(system_parts)
 
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": "\n".join(system_parts)}
-    ]
-    messages.extend(history[-settings.max_conversation_history :])
-    messages.append({"role": "user", "content": user_message})
-    return messages
+    messages = list(history[-settings.max_conversation_history:])
+
+    if attachments:
+        content: list[dict] = [{"type": "text", "text": user_message}]
+        for att in attachments:
+            if att.type == "image" and att.data:
+                content.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": att.media_type or "image/png",
+                        "data": att.data,
+                    },
+                })
+            elif att.type == "text_file" and att.content:
+                content[0]["text"] += f"\n\n[Attached: {att.name}]\n{att.content}"
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_message})
+
+    return system, messages
 
 
 async def _ensure_agent(agent_id: str, persona_id: str, db: aiosqlite.Connection) -> None:
@@ -99,14 +117,15 @@ async def chat(
     await _ensure_agent(agent_id, persona.id, db)
     session = await cache.get(agent_id, persona.id, db)
     memories = await brain.retrieve(agent_id, request.prompt)
-    messages = _build_messages(
-        persona.system_prompt, memories, session.history, request.prompt
+    system, messages = _build_system_and_messages(
+        persona.system_prompt, memories, session.history,
+        request.prompt, request.attachments,
     )
 
     async def generate() -> AsyncIterator[str]:
         full_response: list[str] = []
         try:
-            async for token in chat_stream(messages):
+            async for token in chat_stream(messages, system=system):
                 full_response.append(token)
                 yield f"data: {json.dumps({'token': token})}\n\n"
         finally:
@@ -183,8 +202,7 @@ async def collaborate(
         memories = await brain.retrieve(agent_id, current_content)
 
         prior_context = "\n\n".join(
-            f"[{request.agent_ids[(i % len(request.agent_ids))]}] {t.content}"
-            for i, t in enumerate(turns)
+            f"[{t.persona_name}] {t.content}" for t in turns
         )
         prompt = (
             f"Original task: {request.prompt}\n\n"
@@ -194,10 +212,10 @@ async def collaborate(
             else current_content
         )
 
-        messages = _build_messages(
+        system, messages = _build_system_and_messages(
             persona.system_prompt, memories, session.history, prompt
         )
-        response = await chat_complete(messages)
+        response = await chat_complete(messages, system=system)
 
         turns.append(
             CollaborationTurn(
@@ -213,15 +231,14 @@ async def collaborate(
         session.touch()
         await cache.save(agent_id, db)
 
-    summary_messages = [
-        {
+    summary = await chat_complete(
+        messages=[{
             "role": "user",
             "content": (
-                f"Summarize this collaboration in 2-3 sentences:\n"
+                "Summarize this multi-agent collaboration in 2–3 sentences:\n"
                 + "\n".join(f"[{t.persona_name}]: {t.content}" for t in turns)
             ),
-        }
-    ]
-    summary = await chat_complete(summary_messages)
+        }]
+    )
 
     return CollaborationResult(session_id=session_id, turns=turns, summary=summary)
