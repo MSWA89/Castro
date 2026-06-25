@@ -1,0 +1,7 @@
+obj/
+gen/
+build/*.apk.unaligned
+build/*.dex
+build/*.idsig
+build/maestro.apk
+build/maestro.keystore
